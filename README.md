@@ -1,3 +1,4 @@
+# ATTENTION: this script is UNDER DEVELOPMENT, as it is, this script is just a bunch of mocks and no really working funcitonalities
 # gitnoter
 A simple script to manage your notes with git
 # installation
