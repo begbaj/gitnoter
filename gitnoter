@@ -1,0 +1,71 @@
+#!/bin/python3
+from time import sleep
+import argparse
+import datetime
+
+"""
+    this script should:
+        check if current repo state is committable checking for:
+        - file size
+        - existing swap files
+        * try to understand better the content of git filter-repo analyze output
+
+        if the state is not committable, try to automatically fix problems:
+        - if file size is too big, if possible, compress or split in multiple files.
+
+        if it is not possible to automatically fix, prompt user with actions to take
+            in order to fix the problem BEFORE makeing a commit
+
+        if it is all OK, only then commit and push to origin
+
+    future ideas:
+        - handle remote storage (maybe with rclone)
+"""
+
+class Git:
+    import os
+    def __init__(self) -> None:
+        pass
+
+    def commit(self, message):
+        """ makes the commit """
+        pass
+
+    def check_health(self):
+        """ check health of waht you're committing
+            returns a list of actions to take before committing
+        """
+        pass
+
+def main():
+    git = Git()
+    parser      = argparse.ArgumentParser(description="gitnote will take care of you're notes")
+    subparsers  = parser.add_subparsers()
+
+    run_parser  = subparsers.add_parser('run', help="start gitnoter as a background process") 
+    run_parser.add_argument('-t','--time',
+        metavar='interval',
+        help="interval between updates, in seconds (default is 10 mins)",
+        type=int,
+        default=60000)
+
+    stop_parser       = subparsers.add_parser('stop', help="stop gitnoter background process (if any)") 
+    git_parser        = subparsers.add_parser("git", help="git commands")
+    git_subparser     = git_parser.add_subparsers()
+    git_ignore_parser = git_subparser.add_parser("ignore",
+                        help="add to gitignore the given path")
+    git_ignore_parser.add_argument("path",
+                            help="path to the file to ignore")
+
+    git_forever_remove_parser = git_subparser.add_parser('forever-remove',
+                        help="forever remove the given path - this command is DANGEROUS") 
+    git_forever_remove_parser.add_argument("path",
+                            help="path to the directory to FOREVER REMOVE (this rewrites git history!)")
+    
+    args = parser.parse_args()
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("goodbye")
