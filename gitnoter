@@ -1,7 +1,10 @@
 #!/bin/python3
+from ctypes import sizeof
 from time import sleep
 import argparse
-import datetime
+import fnmatch
+import os
+import git.repo as repo
 
 """
     this script should:
@@ -21,48 +24,206 @@ import datetime
     future ideas:
         - handle remote storage (maybe with rclone)
 """
+class Report:
+    def __init__(self, name) -> None:
+        self._name = name
+        self._lists = {}
 
-class Git:
-    import os
-    def __init__(self) -> None:
-        pass
+    def add_list(self, name, message, ltype=0):
+        """
+            Add a new list of elements relevant for health checking
+            name: name of the list
+            message: the message to display if elements are preseng
+            ltype: 0 (none), 1 (warning), 2 (error)
+        """
+        new_list = {
+            'message': message,
+            'type': ltype,
+            'elements': []
+        }
+        self._lists[name] = new_list
+
+    def get_list_names(self):
+        return self._lists.keys()
+
+    def get_list(self, name):
+        return self._lists[name]
+
+    def append(self, listname, element):
+        self._lists[listname]['elements'].append(element)
+
+class GitCommands:
+    def __init__(self, base=".") -> None:
+        self.base = base
+        self.block_commit = False
+        self.repo = repo.Repo(self.base)
+        self.config = self.repo.config_reader()
+
 
     def commit(self, message):
         """ makes the commit """
-        pass
+        self.check_health()
+        if self.block_commit:
+            print("Before committing, resolve errors")
+            return False
+        else:
+            self.repo.commit()
+        
+    
+    def check_file_size(self):
+        """ check if filesize of any file
+            is greater than 50mb
+        """
+        report = Report("file_size")
+        report.add_list("limit", "file size limit excided (90Mb)", 2)
+        report.add_list("reccomanded", "file size greater than reccomanded (50Mb)", 1)
 
-    def check_health(self):
-        """ check health of waht you're committing
+        try:
+            ignored_patterns = []
+            gitignore_path = os.path.join(self.base, '.gitignore')
+            if os.path.isfile(gitignore_path):
+                with open(gitignore_path, 'r') as f:
+                    ignored_patterns = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+
+            for root, dirs, files in os.walk(self.base):
+                # Filter out directories that are ignored by .gitignore
+                dirs[:] = [d for d in dirs if not any(fnmatch.fnmatch(d, pattern) for pattern in ignored_patterns)]
+                files = [f for f in files if not any(fnmatch.fnmatch(os.path.join(root, f), pattern) for pattern in ignored_patterns)]
+
+                for filename in files:
+                    file_path = os.path.join(root, filename)
+                    if os.path.isfile(file_path):
+                        # Filter out files that are ignored by .gitignore
+                        if any(fnmatch.fnmatch(file_path, pattern) for pattern in ignored_patterns):
+                            continue
+                        if os.path.getsize(file_path) / 1000000 > 90.:
+                            report.append('limit', file_path)
+                        elif os.path.getsize(file_path) / 1000000 > 50.:
+                            report.append('recommended', file_path)
+        except Exception as err:
+            print("an error occured during file_size health checking")
+            print(err)
+        return ["check_file_size", report]
+    
+    def check_git(self):
+        report = Report('git_repository')
+        report.add_list("is_bare", "base folder is not a bare git repository", 2)
+        if self.repo.bare:
+            report.append("is_bare", os.path.abspath(self.base))
+        return ["check_git", report]
+
+
+    def check_health(self, only=[]):
+        """ check health of what you're committing
             returns a list of actions to take before committing
         """
-        pass
+        if len(only) > 0:
+            for tproc in only:
+                if not callable(tproc):
+                    raise TypeError
+            hprocs = only
+        else:
+            hprocs = [self.check_git, self.check_file_size,]
+
+        hprocount = len(hprocs)
+        hproci    = 0
+        erroce = False
+        warnce = False
+        erroc = 0
+        warnc = 0
+        for proc in hprocs:
+            ew = False
+            hproci=+1
+
+            procname, reports = proc()
+
+            print(f"health checking process {hproci}/{hprocount}, '{procname}'")
+            for lisname in reports.get_list_names():
+                report = reports.get_list(lisname)
+                if report["type"] == 0:
+                    erroce = False
+                    warnce = False
+                elif report["type"] == 1:
+                    erroce = False
+                    warnce = True
+                elif report["type"] == 2:
+                    erroce = True
+                    warnce = False
+                if len(report['elements']) > 0:
+                    print(f"{lisname}: {report['message']}")
+                    if erroce or warnce:
+                        ew = True
+                        if erroce:
+                            erroc += len(report['elements'])
+                        else:
+                            warnc += len(report['elements'])
+                    for elem in report['elements']:
+                        print(f"\t{elem}")
+
+            if ew == False: 
+                print(f"No problems found for '{procname}' process")
+
+        print(f"there are {erroc} errors, {warnc} warnings")
+        if erroc == 0 and warnc == 0:
+            print(f"Your repository is healthy!")
+        elif warnc != 0:
+            print(f"Your repository needs some maintainance")
+        if erroc != 0:
+            self.block_commit = True
+            print(f"Your repository is at loss risk")
+            print("gitnoter will not procede until errors are resolved")
+
 
 def main():
-    git = Git()
+    git = GitCommands()
+
     parser      = argparse.ArgumentParser(description="gitnote will take care of you're notes")
-    subparsers  = parser.add_subparsers()
 
-    run_parser  = subparsers.add_parser('run', help="start gitnoter as a background process") 
-    run_parser.add_argument('-t','--time',
-        metavar='interval',
-        help="interval between updates, in seconds (default is 10 mins)",
-        type=int,
-        default=60000)
+    parser.add_argument('-r', "--run",
+                        action='store_const', const=True,
+                        help="run gitnoter (not implemented yet)")
 
-    stop_parser       = subparsers.add_parser('stop', help="stop gitnoter background process (if any)") 
-    git_parser        = subparsers.add_parser("git", help="git commands")
-    git_subparser     = git_parser.add_subparsers()
-    git_ignore_parser = git_subparser.add_parser("ignore",
-                        help="add to gitignore the given path")
-    git_ignore_parser.add_argument("path",
-                            help="path to the file to ignore")
+    parser.add_argument('-d', "--deamon",
+                        action='store_const', const=True,
+                        help="run gitnoter in background (not implemented yet)")
 
-    git_forever_remove_parser = git_subparser.add_parser('forever-remove',
-                        help="forever remove the given path - this command is DANGEROUS") 
-    git_forever_remove_parser.add_argument("path",
-                            help="path to the directory to FOREVER REMOVE (this rewrites git history!)")
+    parser.add_argument('-t', "--time",
+                        type=float,
+                        help="seconds between syncs")
+
+    parser.add_argument('-a', '--add',
+                        type=str,
+                        help="classic git add")
+
+    parser.add_argument('-c', '--commit',
+                        action="store_const", const=True,
+                        help="classic git commit")
     
+    parser.add_argument('-C', "--check-health",
+                        action='store_const', const=True,
+                        help="run all health checking processes")
+
+    parser.add_argument('--check-git',
+                        action='store_const', const=True,
+                        help="check that base directory is a git repository")
+
+    parser.add_argument('--check-size',
+                        action='store_const', const=True,
+                        help="check file size health for each file in repository")
+
     args = parser.parse_args()
+
+    if args.check_health:
+        git.check_health()
+    else:
+        hprocs=[] # health processes
+        if args.check_size:
+            hprocs.append(git.check_file_size)
+        if args.check_git:
+            hprocs.append(git.check_file_size)
+        git.check_health(hprocs)
+
+
 
 if __name__ == "__main__":
     try:
